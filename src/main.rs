@@ -8,7 +8,7 @@ use std::{
 };
 
 use smart_brite::{
-    ble::{BleControl, LightEvent, LightEventSender},
+    ble::{BleControl, LightEvent, LightEventSender, LightState},
     led::{blend_colors, WS2812RMT},
     store::{Color, NvsScene},
 };
@@ -24,23 +24,9 @@ fn main() -> anyhow::Result<()> {
     let light_event_sender = LightEventSender::new(event_tx);
     let ble_control = BleControl::new(light_event_sender)?;
 
-    ble_control
-        .scene_characteristic
-        .lock()
-        .set_value(&nvs_scene.scene.to_u8()?);
+    ble_control.set_scene(&nvs_scene.scene)?;
+    ble_control.set_state(LightState::Opened);
 
-    let ble_control_clone = ble_control.clone();
-
-    std::thread::spawn(move || {
-        ble_control_clone
-            .state_characteristic
-            .lock()
-            .set_value(b"closed");
-        loop {
-            ble_control_clone.state_characteristic.lock().notify();
-            sleep(Duration::from_secs(1));
-        }
-    });
     let gradient_state = Arc::new(AtomicUsize::new(0));
 
     while let Ok(event) = event_rx.recv() {
@@ -48,21 +34,13 @@ fn main() -> anyhow::Result<()> {
             LightEvent::Close => {
                 gradient_state.fetch_add(1, Ordering::Relaxed);
                 led.lock().unwrap().close()?;
-                ble_control
-                    .state_characteristic
-                    .lock()
-                    .set_value(b"closed")
-                    .notify();
+                ble_control.set_state(LightState::Closed);
             }
             LightEvent::Open => match &nvs_scene.scene.color {
                 Color::Solid(solid) => {
                     gradient_state.fetch_add(1, Ordering::Relaxed);
                     led.lock().unwrap().set_pixel(solid.color)?;
-                    ble_control
-                        .state_characteristic
-                        .lock()
-                        .set_value(b"opened")
-                        .notify();
+                    ble_control.set_state(LightState::Opened);
                 }
                 Color::Gradient(gradient) => {
                     let led = led.clone();
@@ -118,28 +96,18 @@ fn main() -> anyhow::Result<()> {
                         });
                     }
 
-                    ble_control
-                        .state_characteristic
-                        .lock()
-                        .set_value(b"opened")
-                        .notify();
+                    ble_control.set_state(LightState::Opened);
                 }
             },
             LightEvent::SetScene(scene) => {
                 log::info!("scene:{scene:#?}");
                 nvs_scene.scene = scene;
                 nvs_scene.write()?;
-                ble_control
-                    .scene_characteristic
-                    .lock()
-                    .set_value(&nvs_scene.scene.to_u8()?);
+                ble_control.set_scene(&nvs_scene.scene)?;
             }
             LightEvent::Reset => {
                 nvs_scene.reset()?;
-                ble_control
-                    .scene_characteristic
-                    .lock()
-                    .set_value(&nvs_scene.scene.to_u8()?);
+                ble_control.set_scene(&nvs_scene.scene)?;
             }
         }
     }

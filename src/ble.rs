@@ -53,6 +53,21 @@ impl LightEventSender {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum LightState {
+    Opened,
+    Closed,
+}
+
+impl Into<&'static [u8]> for LightState {
+    fn into(self) -> &'static [u8] {
+        match self {
+            LightState::Opened => b"opened",
+            LightState::Closed => b"closed",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct BleControl {
     pub scene_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
@@ -138,7 +153,13 @@ impl BleControl {
             uuid128!("e192efae-9626-4767-8a27-b96cb9753e10"),
             NimbleProperties::NOTIFY,
         );
-        state_characteristic.lock().create_2904_descriptor();
+        state_characteristic
+            .lock()
+            .on_subscribe(|characteristic, desc, _| {
+                log::info!("on_subscribe: {:#?}", desc);
+                characteristic.notify();
+            })
+            .create_2904_descriptor();
         // 配置广告数据并启动广告
         advertising.lock().set_data(
             BLEAdvertisementData::new()
@@ -154,5 +175,17 @@ impl BleControl {
             control_characteristic,
             state_characteristic,
         })
+    }
+
+    pub fn set_state(&self, state: LightState) {
+        self.state_characteristic
+            .lock()
+            .set_value(state.into())
+            .notify();
+    }
+
+    pub fn set_scene(&self, scene: &Scene) -> Result<()> {
+        self.scene_characteristic.lock().set_value(&scene.to_u8()?);
+        Ok(())
     }
 }
