@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
     thread::sleep,
@@ -41,12 +41,12 @@ fn main() -> anyhow::Result<()> {
             sleep(Duration::from_secs(1));
         }
     });
-    let state = Arc::new(AtomicBool::new(false));
+    let gradient_state = Arc::new(AtomicUsize::new(0));
 
     while let Ok(event) = event_rx.recv() {
         match event {
             LightEvent::Close => {
-                state.store(false, Ordering::Relaxed);
+                gradient_state.fetch_add(1, Ordering::Relaxed);
                 led.lock().unwrap().close()?;
                 ble_control
                     .state_characteristic
@@ -54,77 +54,77 @@ fn main() -> anyhow::Result<()> {
                     .set_value(b"closed")
                     .notify();
             }
-            LightEvent::Open => {
-                state.store(true, Ordering::Relaxed);
-                match &nvs_scene.scene.color {
-                    Color::Solid(solid) => {
-                        led.lock().unwrap().set_pixel(solid.color)?;
-                        ble_control
-                            .state_characteristic
-                            .lock()
-                            .set_value(b"opened")
-                            .notify();
-                    }
-                    Color::Gradient(gradient) => {
-                        let led = led.clone();
-                        let state = state.clone();
-                        if gradient.linear {
-                            let durations = gradient.get_color_durations();
-                            std::thread::spawn(move || {
-                                let mut current = 0usize;
-                                loop {
-                                    let index = current % durations.len();
-                                    let color_duration = &durations[index];
-                                    let instance = std::time::Instant::now();
-                                    let is_open = state.load(Ordering::Relaxed);
-                                    if !is_open {
-                                        led.lock().unwrap().close()?;
-                                        break;
-                                    }
-                                    while instance.elapsed() < color_duration.duration
-                                        && state.load(Ordering::Relaxed)
-                                    {
-                                        let color = blend_colors(
-                                            color_duration.start_color,
-                                            color_duration.end_color,
-                                            (instance.elapsed().as_millis() as f32)
-                                                / color_duration.duration.as_millis() as f32,
-                                        );
-                                        led.lock().unwrap().set_pixel(color)?;
-                                        sleep(Duration::from_millis(60));
-                                    }
-                                    current += 1;
-                                }
-                                Ok::<(), anyhow::Error>(())
-                            });
-                        } else {
-                            let durations = gradient.colors.clone();
-                            std::thread::spawn(move || {
-                                let mut current = 0usize;
-                                loop {
-                                    let index = current % durations.len();
-                                    let color_duration = &durations[index];
-                                    let is_open = state.load(Ordering::Relaxed);
-                                    if !is_open {
-                                        led.lock().unwrap().close()?;
-                                        break;
-                                    }
-                                    led.lock().unwrap().set_pixel(color_duration.color)?;
-                                    sleep(Duration::from_secs_f32(color_duration.duration));
-                                    current += 1;
-                                }
-                                Ok::<(), anyhow::Error>(())
-                            });
-                        }
-
-                        ble_control
-                            .state_characteristic
-                            .lock()
-                            .set_value(b"opened")
-                            .notify();
-                    }
+            LightEvent::Open => match &nvs_scene.scene.color {
+                Color::Solid(solid) => {
+                    gradient_state.fetch_add(1, Ordering::Relaxed);
+                    led.lock().unwrap().set_pixel(solid.color)?;
+                    ble_control
+                        .state_characteristic
+                        .lock()
+                        .set_value(b"opened")
+                        .notify();
                 }
-            }
+                Color::Gradient(gradient) => {
+                    let led = led.clone();
+                    let gradient_state = gradient_state.clone();
+                    let current_id = gradient_state.load(Ordering::Relaxed) + 1;
+                    if gradient.linear {
+                        let durations = gradient.get_color_durations();
+                        std::thread::spawn(move || {
+                            let mut current = 0usize;
+                            gradient_state.fetch_add(1, Ordering::Relaxed);
+                            loop {
+                                let index = current % durations.len();
+                                let color_duration = &durations[index];
+                                let instance = std::time::Instant::now();
+                                if current_id != gradient_state.load(Ordering::Relaxed) {
+                                    led.lock().unwrap().close()?;
+                                    break;
+                                }
+                                while instance.elapsed() < color_duration.duration
+                                    && current_id == gradient_state.load(Ordering::Relaxed)
+                                {
+                                    let color = blend_colors(
+                                        color_duration.start_color,
+                                        color_duration.end_color,
+                                        (instance.elapsed().as_millis() as f32)
+                                            / color_duration.duration.as_millis() as f32,
+                                    );
+                                    led.lock().unwrap().set_pixel(color)?;
+                                    sleep(Duration::from_millis(60));
+                                }
+                                current += 1;
+                            }
+                            Ok::<(), anyhow::Error>(())
+                        });
+                    } else {
+                        let durations = gradient.colors.clone();
+                        std::thread::spawn(move || {
+                            let mut current = 0usize;
+                            gradient_state.fetch_add(1, Ordering::Relaxed);
+                            loop {
+                                let index = current % durations.len();
+                                let color_duration = &durations[index];
+                                let is_open = gradient_state.load(Ordering::Relaxed);
+                                if is_open != current_id {
+                                    led.lock().unwrap().close()?;
+                                    break;
+                                }
+                                led.lock().unwrap().set_pixel(color_duration.color)?;
+                                sleep(Duration::from_secs_f32(color_duration.duration));
+                                current += 1;
+                            }
+                            Ok::<(), anyhow::Error>(())
+                        });
+                    }
+
+                    ble_control
+                        .state_characteristic
+                        .lock()
+                        .set_value(b"opened")
+                        .notify();
+                }
+            },
             LightEvent::SetScene(scene) => {
                 log::info!("scene:{scene:#?}");
                 nvs_scene.scene = scene;
