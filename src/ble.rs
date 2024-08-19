@@ -110,25 +110,32 @@ impl BleControl {
         // 创建配置scene特征
         let scene_characteristic = service.lock().create_characteristic(
             uuid128!("c7d7ee2f-c84b-4f5c-a2a4-e642c97a880d"),
-            NimbleProperties::READ | NimbleProperties::WRITE,
+            NimbleProperties::READ | NimbleProperties::WRITE | NimbleProperties::NOTIFY,
         );
         let light = light_sender.clone();
-        scene_characteristic.lock().on_write(move |args| {
-            let data = args.recv_data();
-            log::warn!("data:{data:?}");
-            match Scene::from_u8(data) {
-                Ok(scene) => {
-                    if light.set_scene(scene).is_err() {
+        scene_characteristic
+            .lock()
+            .on_write(move |args| {
+                let data = args.recv_data();
+                log::warn!("data:{data:?}");
+                match Scene::from_u8(data) {
+                    Ok(scene) => {
+                        if light.set_scene(scene).is_err() {
+                            args.reject();
+                            log::error!("set scene error");
+                        }
+                    }
+                    Err(e) => {
                         args.reject();
-                        log::error!("set scene error");
+                        log::error!("parse scene error: {:#?}", e);
                     }
                 }
-                Err(e) => {
-                    args.reject();
-                    log::error!("parse scene error: {:#?}", e);
-                }
-            }
-        });
+            })
+            .on_subscribe(|characteristic, desc, _| {
+                log::info!("on_subscribe: {:#?}", desc);
+                characteristic.notify();
+            })
+            .create_2904_descriptor();
 
         let control_characteristic = service.lock().create_characteristic(
             uuid128!("bc00dad8-280c-49f9-9efd-3a8137594ef2"),
@@ -185,7 +192,10 @@ impl BleControl {
     }
 
     pub fn set_scene(&self, scene: &Scene) -> Result<()> {
-        self.scene_characteristic.lock().set_value(&scene.to_u8()?);
+        self.scene_characteristic
+            .lock()
+            .set_value(&scene.to_u8()?)
+            .notify();
         Ok(())
     }
 }
