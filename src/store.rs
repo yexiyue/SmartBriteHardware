@@ -1,6 +1,8 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
+
+use esp32_nimble::utilities::mutex::Mutex;
 use esp_idf_svc::nvs::{EspNvs, EspNvsPartition, NvsDefault};
 use rgb::RGB8;
 use serde::{Deserialize, Serialize};
@@ -92,7 +94,7 @@ impl Scene {
 }
 
 pub struct NvsScene {
-    pub scene: Scene,
+    pub scene: Arc<Mutex<Scene>>,
     nvs: EspNvs<NvsDefault>,
 }
 
@@ -108,17 +110,20 @@ impl NvsScene {
             Scene::default()
         };
 
-        Ok(Self { scene, nvs })
+        Ok(Self {
+            scene: Arc::new(Mutex::new(scene)),
+            nvs,
+        })
     }
 
     pub fn write(&mut self) -> Result<()> {
-        let data = self.scene.to_u8()?;
+        let data = self.scene.lock().to_u8()?;
         self.nvs.set_blob(SCENE, &data)?;
         Ok(())
     }
 
     pub fn reset(&mut self) -> Result<bool> {
-        self.scene = Scene::default();
+        *self.scene.lock() = Scene::default();
         Ok(self.nvs.remove(SCENE)?)
     }
 }

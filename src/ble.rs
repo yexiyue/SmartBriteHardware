@@ -68,6 +68,16 @@ impl Into<&'static [u8]> for LightState {
     }
 }
 
+impl From<&[u8]> for LightState {
+    fn from(value: &[u8]) -> Self {
+        match value {
+            b"opened" => LightState::Opened,
+            b"closed" => LightState::Closed,
+            _ => panic!("invalid state"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct BleControl {
     pub scene_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
@@ -158,7 +168,7 @@ impl BleControl {
         });
         let state_characteristic = service.lock().create_characteristic(
             uuid128!("e192efae-9626-4767-8a27-b96cb9753e10"),
-            NimbleProperties::NOTIFY,
+            NimbleProperties::NOTIFY | NimbleProperties::READ,
         );
         state_characteristic
             .lock()
