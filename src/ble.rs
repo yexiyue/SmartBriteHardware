@@ -208,4 +208,8 @@ impl BleControl {
             .notify();
         Ok(())
     }
+
+    pub fn get_state(&self) -> LightState {
+        self.state_characteristic.lock().value_mut().value().into()
+    }
 }

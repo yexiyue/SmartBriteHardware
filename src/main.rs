@@ -1,4 +1,5 @@
 use std::{
+    num::NonZeroU32,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -7,6 +8,10 @@ use std::{
     time::Duration,
 };
 
+use esp_idf_svc::hal::{
+    gpio::{InterruptType, PinDriver, Pull},
+    task::notification::Notification,
+};
 use smart_brite::{
     ble::{BleControl, LightEvent, LightEventSender, LightState},
     led::{blend_colors, WS2812RMT},
@@ -23,16 +28,46 @@ fn main() -> anyhow::Result<()> {
     )?));
     let mut nvs_scene = NvsScene::new(nvs_partition)?;
     let light_event_sender = LightEventSender::new(event_tx);
+    let light_event_sender_clone = light_event_sender.clone();
     let ble_control = BleControl::new(light_event_sender)?;
 
     ble_control.set_scene(&nvs_scene.scene.lock())?;
     ble_control.set_state(LightState::Closed);
     let ble_control_clone = ble_control.clone();
+    let ble_control_clone2 = ble_control.clone();
     let scene = nvs_scene.scene.clone();
 
     // 标识位，用于退出loop循环
     let flag = Arc::new(AtomicUsize::new(0));
     let flag_clone = flag.clone();
+
+    let mut button = PinDriver::input(peripherals.pins.gpio9)?;
+    button.set_pull(Pull::Up)?;
+    button.set_interrupt_type(InterruptType::PosEdge)?;
+
+    std::thread::spawn(move || -> Result<(), anyhow::Error> {
+        let notification = Notification::new();
+        let notifier = notification.notifier();
+        unsafe {
+            button.subscribe(move || {
+                notifier.notify_and_yield(NonZeroU32::new(1).unwrap());
+            })?;
+        }
+
+        loop {
+            button.enable_interrupt()?;
+            notification.wait(esp_idf_svc::hal::delay::BLOCK);
+            let state = ble_control_clone2.get_state();
+            match state {
+                LightState::Closed => {
+                    light_event_sender_clone.open()?;
+                }
+                LightState::Opened => {
+                    light_event_sender_clone.close()?;
+                }
+            }
+        }
+    });
 
     // 专门开一个线程处理灯的状态，通过channel信道通信
     std::thread::spawn(move || {
