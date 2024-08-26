@@ -6,6 +6,7 @@ use esp_idf_svc::nvs::EspDefaultNvsPartition;
 pub mod ble;
 pub mod led;
 pub mod store;
+pub mod timer;
 pub fn init() -> Result<(EspSystemEventLoop, Peripherals, EspDefaultNvsPartition)> {
     // 链接SDK中的补丁，以修正某些功能的兼容性问题。
     esp_idf_svc::sys::link_patches();

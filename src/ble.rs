@@ -1,9 +1,15 @@
-use crate::store::Scene;
+use crate::{
+    store::Scene,
+    timer::{TimerEvent, TimerEventSender},
+};
 use anyhow::Result;
 use esp32_nimble::{
     utilities::mutex::Mutex, uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties,
 };
-use std::sync::{mpsc::Sender, Arc};
+use serde::{Deserialize, Serialize};
+
+use futures::channel::mpsc::Sender;
+use std::{sync::Arc, time::Duration};
 
 pub enum LightEvent {
     Close,
@@ -12,7 +18,8 @@ pub enum LightEvent {
     Reset,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LightControl {
     Close,
     Open,
@@ -39,17 +46,17 @@ impl LightEventSender {
     pub fn new(event_tx: Sender<LightEvent>) -> Self {
         LightEventSender { event_tx }
     }
-    pub fn close(&self) -> Result<()> {
-        Ok(self.event_tx.send(LightEvent::Close)?)
+    pub fn close(&mut self) -> Result<()> {
+        Ok(self.event_tx.try_send(LightEvent::Close)?)
     }
-    pub fn open(&self) -> Result<()> {
-        Ok(self.event_tx.send(LightEvent::Open)?)
+    pub fn open(&mut self) -> Result<()> {
+        Ok(self.event_tx.try_send(LightEvent::Open)?)
     }
-    pub fn set_scene(&self, scene: Scene) -> Result<()> {
-        Ok(self.event_tx.send(LightEvent::SetScene(scene))?)
+    pub fn set_scene(&mut self, scene: Scene) -> Result<()> {
+        Ok(self.event_tx.try_send(LightEvent::SetScene(scene))?)
     }
-    pub fn reset(&self) -> Result<()> {
-        Ok(self.event_tx.send(LightEvent::Reset)?)
+    pub fn reset(&mut self) -> Result<()> {
+        Ok(self.event_tx.try_send(LightEvent::Reset)?)
     }
 }
 
@@ -83,10 +90,11 @@ pub struct BleControl {
     pub scene_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
     pub control_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
     pub state_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
+    pub time_task_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
 }
 
 impl BleControl {
-    pub fn new(light_sender: LightEventSender) -> Result<Self> {
+    pub fn new(light_sender: LightEventSender, mut time_sender: TimerEventSender) -> Result<Self> {
         // 获取BLE设备实例
         let device = BLEDevice::take();
 
@@ -122,7 +130,7 @@ impl BleControl {
             uuid128!("c7d7ee2f-c84b-4f5c-a2a4-e642c97a880d"),
             NimbleProperties::READ | NimbleProperties::WRITE | NimbleProperties::NOTIFY,
         );
-        let light = light_sender.clone();
+        let mut light = light_sender.clone();
         scene_characteristic
             .lock()
             .on_write(move |args| {
@@ -152,7 +160,7 @@ impl BleControl {
             NimbleProperties::WRITE,
         );
 
-        let light = light_sender.clone();
+        let mut light = light_sender.clone();
         control_characteristic.lock().on_write(move |args| {
             let data = args.recv_data();
             let control = LightControl::from(data);
@@ -177,6 +185,47 @@ impl BleControl {
                 characteristic.notify();
             })
             .create_2904_descriptor();
+
+        // 同步时间特征
+        let time_characteristic = service.lock().create_characteristic(
+            uuid128!("9ae95835-6543-4bd0-8aec-6c48fe9fd989"),
+            NimbleProperties::WRITE,
+        );
+        time_characteristic.lock().on_write(|args| {
+            let data = args.recv_data();
+            if data.len() == 8 {
+                let t_ptr = data.as_ptr() as *const [u8; 8];
+                let timestamp = u64::from_ne_bytes(unsafe { std::ptr::read(t_ptr) });
+                let time = Duration::from_millis(timestamp);
+                unsafe {
+                    esp_idf_svc::sys::sntp_set_system_time(
+                        time.as_secs() as u32,
+                        time.subsec_nanos() / 1000,
+                    )
+                }
+                log::warn!("set time {time:?}");
+            } else {
+                args.reject();
+                log::error!("time error");
+            }
+        });
+
+        let time_task_characteristic = service.lock().create_characteristic(
+            uuid128!("f144af69-9642-97e1-d712-9448d1b450a1"),
+            NimbleProperties::WRITE,
+        );
+        time_task_characteristic.lock().on_write(move |args| {
+            let data = args.recv_data();
+            match serde_json::from_slice::<TimerEvent>(data) {
+                Ok(event) => {
+                    time_sender.event_tx.try_send(event).unwrap();
+                }
+                Err(e) => {
+                    args.reject();
+                    log::error!("parse time task error: {:#?}", e);
+                }
+            };
+        });
         // 配置广告数据并启动广告
         advertising.lock().set_data(
             BLEAdvertisementData::new()
@@ -187,10 +236,12 @@ impl BleControl {
         advertising.lock().start()?;
         // 打印蓝牙服务相关日志
         server.ble_gatts_show_local();
+
         Ok(Self {
             scene_characteristic,
             control_characteristic,
             state_characteristic,
+            time_task_characteristic,
         })
     }
 
