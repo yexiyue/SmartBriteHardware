@@ -8,20 +8,15 @@ use std::{
     time::Duration,
 };
 
-use chrono::{TimeDelta, Utc};
-use esp32_nimble::utilities::mutex::Mutex as NimbleMutex;
 use esp_idf_svc::hal::{
     gpio::{InterruptType, PinDriver, Pull},
     task::notification::Notification,
 };
 use futures::{channel::mpsc, executor::LocalPool, task::SpawnExt, StreamExt};
 use smart_brite::{
-    ble::{BleControl, LightControl, LightEvent, LightEventSender, LightState},
+    ble::{BleControl, LightEvent, LightEventSender, LightState},
     led::{blend_colors, WS2812RMT},
-    store::{
-        time_task::{OnceTask, TimeFrequency, TimeTask},
-        Color, NvsStore,
-    },
+    store::{Color, NvsStore},
     timer::{TimeTaskManager, TimerEventSender},
 };
 
@@ -35,43 +30,26 @@ fn main() -> anyhow::Result<()> {
         peripherals.rmt.channel0,
     )?));
     let mut pool = LocalPool::new();
-    let mut nvs_scene = NvsStore::new(nvs_partition)?;
+    let nvs_store = NvsStore::new(nvs_partition)?;
+
     let light_event_sender = LightEventSender::new(event_tx);
     let timer_event_sender = TimerEventSender::new(time_event_tx);
+
     let time_task_manager = TimeTaskManager::new(
-        Arc::new(NimbleMutex::new(vec![
-            TimeTask {
-                name: "default".into(),
-                operation: LightControl::Open,
-                frequency: TimeFrequency::Once(OnceTask {
-                    end_time: Utc::now()
-                        .checked_add_signed(TimeDelta::seconds(5))
-                        .unwrap(),
-                }),
-            },
-            TimeTask {
-                name: "default2".into(),
-                operation: LightControl::Close,
-                frequency: TimeFrequency::Once(OnceTask {
-                    end_time: Utc::now()
-                        .checked_add_signed(TimeDelta::seconds(7))
-                        .unwrap(),
-                }),
-            },
-        ])),
+        nvs_store.time_task.clone(),
         light_event_sender.clone(),
         pool.spawner(),
     );
-    time_task_manager.event(time_event_rx)?;
+    time_task_manager.event(time_event_rx, nvs_store.clone())?;
 
     let mut light_event_sender_clone = light_event_sender.clone();
     let ble_control = BleControl::new(light_event_sender, timer_event_sender)?;
 
-    ble_control.set_scene(&nvs_scene.scene.lock())?;
+    ble_control.set_scene(&nvs_store.scene.lock())?;
     ble_control.set_state(LightState::Closed);
     let ble_control_clone = ble_control.clone();
     let ble_control_clone2 = ble_control.clone();
-    let scene = nvs_scene.scene.clone();
+    let scene = nvs_store.scene.clone();
 
     // 标识位，用于退出loop循环
     let flag = Arc::new(AtomicUsize::new(0));
@@ -187,16 +165,16 @@ fn main() -> anyhow::Result<()> {
                 }
                 LightEvent::SetScene(scene) => {
                     log::info!("scene:{scene:#?}");
-                    *nvs_scene.scene.lock() = scene;
-                    nvs_scene.write().unwrap();
+                    *nvs_store.scene.lock() = scene;
+                    nvs_store.write_scene().unwrap();
                     ble_control_clone
-                        .set_scene(&nvs_scene.scene.lock())
+                        .set_scene(&nvs_store.scene.lock())
                         .unwrap();
                 }
                 LightEvent::Reset => {
-                    nvs_scene.reset().unwrap();
+                    nvs_store.reset_scene().unwrap();
                     ble_control_clone
-                        .set_scene(&nvs_scene.scene.lock())
+                        .set_scene(&nvs_store.scene.lock())
                         .unwrap();
                 }
             }

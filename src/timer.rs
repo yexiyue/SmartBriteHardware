@@ -1,6 +1,6 @@
 use crate::{
     ble::{LightControl, LightEventSender},
-    store::time_task::TimeTask,
+    store::{time_task::TimeTask, NvsStore},
 };
 use anyhow::Result;
 use esp32_nimble::utilities::mutex::Mutex;
@@ -124,7 +124,11 @@ impl TimeTaskManager {
         Ok(())
     }
 
-    pub fn event(&self, mut task_rx: mpsc::Receiver<TimerEvent>) -> Result<()> {
+    pub fn event(
+        &self,
+        mut task_rx: mpsc::Receiver<TimerEvent>,
+        nvs_store: NvsStore,
+    ) -> Result<()> {
         let manager = self.clone();
         self.spawner.spawn(async move {
             if let Some(event) = task_rx.next().await {
@@ -136,6 +140,7 @@ impl TimeTaskManager {
                         manager.abort(&name);
                     }
                 }
+                nvs_store.write_time_task().unwrap();
             }
         })?;
         Ok(())
