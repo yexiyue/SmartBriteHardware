@@ -1,5 +1,5 @@
 use crate::{
-    store::Scene,
+    store::{time_task::TimeTask, NvsStore, Scene},
     timer::{TimerEvent, TimerEventSender},
 };
 use anyhow::Result;
@@ -87,6 +87,7 @@ impl From<&[u8]> for LightState {
 
 #[derive(Clone)]
 pub struct BleControl {
+    pub nvs_store: NvsStore,
     pub scene_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
     pub control_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
     pub state_characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
@@ -94,7 +95,11 @@ pub struct BleControl {
 }
 
 impl BleControl {
-    pub fn new(light_sender: LightEventSender, mut time_sender: TimerEventSender) -> Result<Self> {
+    pub fn new(
+        nvs_store: NvsStore,
+        light_sender: LightEventSender,
+        mut time_sender: TimerEventSender,
+    ) -> Result<Self> {
         // 获取BLE设备实例
         let device = BLEDevice::take();
 
@@ -212,20 +217,26 @@ impl BleControl {
 
         let time_task_characteristic = service.lock().create_characteristic(
             uuid128!("f144af69-9642-97e1-d712-9448d1b450a1"),
-            NimbleProperties::WRITE,
+            NimbleProperties::WRITE | NimbleProperties::READ | NimbleProperties::NOTIFY,
         );
-        time_task_characteristic.lock().on_write(move |args| {
-            let data = args.recv_data();
-            match serde_json::from_slice::<TimerEvent>(data) {
-                Ok(event) => {
-                    time_sender.event_tx.try_send(event).unwrap();
-                }
-                Err(e) => {
-                    args.reject();
-                    log::error!("parse time task error: {:#?}", e);
-                }
-            };
-        });
+        time_task_characteristic
+            .lock()
+            .on_write(move |args| {
+                let data = args.recv_data();
+                match serde_json::from_slice::<TimerEvent>(data) {
+                    Ok(event) => {
+                        time_sender.event_tx.try_send(event).unwrap();
+                    }
+                    Err(e) => {
+                        args.reject();
+                        log::error!("parse time task error: {:#?}", e);
+                    }
+                };
+            })
+            .on_subscribe(|characteristic, _desc, _| {
+                characteristic.notify();
+            })
+            .create_2904_descriptor();
         // 配置广告数据并启动广告
         advertising.lock().set_data(
             BLEAdvertisementData::new()
@@ -238,6 +249,7 @@ impl BleControl {
         server.ble_gatts_show_local();
 
         Ok(Self {
+            nvs_store,
             scene_characteristic,
             control_characteristic,
             state_characteristic,
@@ -260,7 +272,41 @@ impl BleControl {
         Ok(())
     }
 
+    pub fn set_timer(&self, time_task: &[TimeTask]) -> Result<()> {
+        self.time_task_characteristic
+            .lock()
+            .set_value(&serde_json::to_vec(time_task).unwrap())
+            .notify();
+        Ok(())
+    }
+
     pub fn get_state(&self) -> LightState {
         self.state_characteristic.lock().value_mut().value().into()
+    }
+
+    pub fn init(&self) -> Result<()> {
+        self.set_timer(&self.nvs_store.time_task.lock())?;
+        self.set_scene(&self.nvs_store.scene.lock())?;
+        self.set_state(LightState::Closed);
+        Ok(())
+    }
+
+    pub fn set_timer_with_store(&self) -> Result<()> {
+        self.nvs_store.write_time_task()?;
+        self.set_timer(&self.nvs_store.time_task.lock())?;
+        Ok(())
+    }
+
+    pub fn reset_scene(&self) -> Result<()> {
+        self.nvs_store.reset_scene()?;
+        self.set_scene(&self.nvs_store.scene.lock())?;
+        Ok(())
+    }
+
+    pub fn set_scene_width_store(&self, scene: Scene) -> Result<()> {
+        *self.nvs_store.scene.lock() = scene;
+        self.nvs_store.write_scene()?;
+        self.set_scene(&self.nvs_store.scene.lock())?;
+        Ok(())
     }
 }

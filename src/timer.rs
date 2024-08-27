@@ -1,6 +1,6 @@
 use crate::{
-    ble::{LightControl, LightEventSender},
-    store::{time_task::TimeTask, NvsStore},
+    ble::{BleControl, LightControl, LightEventSender},
+    store::time_task::TimeTask,
 };
 use anyhow::Result;
 use esp32_nimble::utilities::mutex::Mutex;
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(rename_all = "camelCase", tag = "type", content = "data")]
 pub enum TimerEvent {
     AddTask(TimeTask),
     RemoveTask(String),
@@ -127,7 +127,7 @@ impl TimeTaskManager {
     pub fn event(
         &self,
         mut task_rx: mpsc::Receiver<TimerEvent>,
-        nvs_store: NvsStore,
+        ble_control: BleControl,
     ) -> Result<()> {
         let manager = self.clone();
         self.spawner.spawn(async move {
@@ -140,7 +140,7 @@ impl TimeTaskManager {
                         manager.abort(&name);
                     }
                 }
-                nvs_store.write_time_task().unwrap();
+                ble_control.set_timer_with_store().unwrap();
             }
         })?;
         Ok(())

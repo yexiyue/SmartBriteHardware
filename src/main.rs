@@ -40,13 +40,11 @@ fn main() -> anyhow::Result<()> {
         light_event_sender.clone(),
         pool.spawner(),
     );
-    time_task_manager.event(time_event_rx, nvs_store.clone())?;
 
     let mut light_event_sender_clone = light_event_sender.clone();
-    let ble_control = BleControl::new(light_event_sender, timer_event_sender)?;
-
-    ble_control.set_scene(&nvs_store.scene.lock())?;
-    ble_control.set_state(LightState::Closed);
+    let ble_control = BleControl::new(nvs_store.clone(), light_event_sender, timer_event_sender)?;
+    time_task_manager.event(time_event_rx, ble_control.clone())?;
+    ble_control.init()?;
     let ble_control_clone = ble_control.clone();
     let ble_control_clone2 = ble_control.clone();
     let scene = nvs_store.scene.clone();
@@ -165,17 +163,10 @@ fn main() -> anyhow::Result<()> {
                 }
                 LightEvent::SetScene(scene) => {
                     log::info!("scene:{scene:#?}");
-                    *nvs_store.scene.lock() = scene;
-                    nvs_store.write_scene().unwrap();
-                    ble_control_clone
-                        .set_scene(&nvs_store.scene.lock())
-                        .unwrap();
+                    ble_control_clone.set_scene_width_store(scene).unwrap();
                 }
                 LightEvent::Reset => {
-                    nvs_store.reset_scene().unwrap();
-                    ble_control_clone
-                        .set_scene(&nvs_store.scene.lock())
-                        .unwrap();
+                    ble_control_clone.reset_scene().unwrap();
                 }
             }
         }

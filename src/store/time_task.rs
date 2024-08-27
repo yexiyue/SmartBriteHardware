@@ -10,7 +10,7 @@ pub trait GetDelta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TimeFrequency {
     Once(OnceTask),
     Day(DayTask),
@@ -25,6 +25,7 @@ pub struct TimeTask {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OnceTask {
     pub end_time: DateTime<Utc>,
 }
@@ -55,6 +56,7 @@ impl OnceTask {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DayTask {
     pub delay: DateTime<Utc>,
 }
@@ -89,6 +91,7 @@ impl DayTask {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WeekTask {
     pub day_of_week: u32,
     pub delay: DateTime<Utc>,
