@@ -1,7 +1,5 @@
-use crate::{
-    ble::{BleControl, LightControl, LightEventSender},
-    store::time_task::TimeTask,
-};
+use crate::light::{LightControl, LightEventSender};
+use crate::{ble::BleControl, store::time_task::TimeTask};
 use anyhow::Result;
 use esp32_nimble::utilities::mutex::Mutex;
 use esp_idf_svc::timer::{EspTaskTimerService, EspTimerService, Task};

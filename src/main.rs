@@ -1,3 +1,12 @@
+use futures::{executor::LocalPool, task::SpawnExt, StreamExt};
+use smart_brite::{
+    ble::BleControl,
+    button::Button,
+    led::{blend_colors, WS2812RMT},
+    light::{LightEvent, LightEventSender, LightState},
+    store::{Color, NvsStore},
+    timer::{TimeTaskManager, TimerEventSender},
+};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -5,15 +14,6 @@ use std::{
     },
     thread::sleep,
     time::Duration,
-};
-
-use futures::{executor::LocalPool, task::SpawnExt, StreamExt};
-use smart_brite::{
-    ble::{BleControl, LightEvent, LightEventSender, LightState},
-    button::Button,
-    led::{blend_colors, WS2812RMT},
-    store::{Color, NvsStore},
-    timer::{TimeTaskManager, TimerEventSender},
 };
 
 fn main() -> anyhow::Result<()> {

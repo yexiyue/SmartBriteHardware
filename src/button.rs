@@ -1,12 +1,13 @@
-use std::num::NonZeroU32;
-
+use crate::{
+    ble::BleControl,
+    light::{LightEventSender, LightState},
+};
 use anyhow::Result;
 use esp_idf_svc::hal::{
     gpio::{Input, InputPin, InterruptType, OutputPin, PinDriver, Pull},
     task::notification::Notification,
 };
-
-use crate::ble::{BleControl, LightEventSender, LightState};
+use std::num::NonZeroU32;
 
 pub struct Button<T>
 where
