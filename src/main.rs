@@ -1,5 +1,4 @@
 use std::{
-    num::NonZeroU32,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -8,13 +7,10 @@ use std::{
     time::Duration,
 };
 
-use esp_idf_svc::hal::{
-    gpio::{InterruptType, PinDriver, Pull},
-    task::notification::Notification,
-};
-use futures::{channel::mpsc, executor::LocalPool, task::SpawnExt, StreamExt};
+use futures::{executor::LocalPool, task::SpawnExt, StreamExt};
 use smart_brite::{
     ble::{BleControl, LightEvent, LightEventSender, LightState},
+    button::Button,
     led::{blend_colors, WS2812RMT},
     store::{Color, NvsStore},
     timer::{TimeTaskManager, TimerEventSender},
@@ -22,18 +18,19 @@ use smart_brite::{
 
 fn main() -> anyhow::Result<()> {
     let (_sys_loop, peripherals, nvs_partition) = smart_brite::init()?;
-    let (event_tx, mut event_rx) = mpsc::channel(10);
-    let (time_event_tx, time_event_rx) = mpsc::channel(10);
+
     let (tx, rx) = std::sync::mpsc::channel::<LightState>();
     let led = Arc::new(Mutex::new(WS2812RMT::new(
         peripherals.pins.gpio8,
         peripherals.rmt.channel0,
     )?));
+
     let mut pool = LocalPool::new();
+
     let nvs_store = NvsStore::new(nvs_partition)?;
 
-    let light_event_sender = LightEventSender::new(event_tx);
-    let timer_event_sender = TimerEventSender::new(time_event_tx);
+    let (light_event_sender, mut event_rx) = LightEventSender::new_pari();
+    let (timer_event_sender, time_event_rx) = TimerEventSender::new_pair();
 
     let time_task_manager = TimeTaskManager::new(
         nvs_store.time_task.clone(),
@@ -41,45 +38,26 @@ fn main() -> anyhow::Result<()> {
         pool.spawner(),
     );
 
-    let mut light_event_sender_clone = light_event_sender.clone();
-    let ble_control = BleControl::new(nvs_store.clone(), light_event_sender, timer_event_sender)?;
+    let ble_control = BleControl::new(
+        nvs_store.clone(),
+        light_event_sender.clone(),
+        timer_event_sender,
+    )?;
+    let button = Button::new(
+        peripherals.pins.gpio9,
+        ble_control.clone(),
+        light_event_sender,
+    )?;
     time_task_manager.event(time_event_rx, ble_control.clone())?;
     ble_control.init()?;
+    button.init()?;
+
     let ble_control_clone = ble_control.clone();
-    let ble_control_clone2 = ble_control.clone();
     let scene = nvs_store.scene.clone();
 
     // 标识位，用于退出loop循环
     let flag = Arc::new(AtomicUsize::new(0));
     let flag_clone = flag.clone();
-
-    let mut button = PinDriver::input(peripherals.pins.gpio9)?;
-    button.set_pull(Pull::Up)?;
-    button.set_interrupt_type(InterruptType::PosEdge)?;
-
-    std::thread::spawn(move || -> Result<(), anyhow::Error> {
-        let notification = Notification::new();
-        let notifier = notification.notifier();
-        unsafe {
-            button.subscribe(move || {
-                notifier.notify_and_yield(NonZeroU32::new(1).unwrap());
-            })?;
-        }
-
-        loop {
-            button.enable_interrupt()?;
-            notification.wait(esp_idf_svc::hal::delay::BLOCK);
-            let state = ble_control_clone2.get_state();
-            match state {
-                LightState::Closed => {
-                    light_event_sender_clone.open()?;
-                }
-                LightState::Opened => {
-                    light_event_sender_clone.close()?;
-                }
-            }
-        }
-    });
 
     // 专门开一个线程处理灯的状态，通过channel信道通信
     std::thread::spawn(move || {
@@ -171,6 +149,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
     })?;
+
     time_task_manager.run()?;
     pool.run();
     Ok(())

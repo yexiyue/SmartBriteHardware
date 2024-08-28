@@ -34,6 +34,11 @@ impl TimerEventSender {
     pub fn remove_task(&mut self, name: String) -> Result<()> {
         Ok(self.event_tx.try_send(TimerEvent::RemoveTask(name))?)
     }
+
+    pub fn new_pair() -> (TimerEventSender, mpsc::Receiver<TimerEvent>) {
+        let (tx, rx) = mpsc::channel(10);
+        (TimerEventSender::new(tx), rx)
+    }
 }
 
 #[derive(Clone)]

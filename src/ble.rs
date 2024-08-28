@@ -8,7 +8,7 @@ use esp32_nimble::{
 };
 use serde::{Deserialize, Serialize};
 
-use futures::channel::mpsc::Sender;
+use futures::channel::mpsc::{self, Receiver, Sender};
 use std::{sync::Arc, time::Duration};
 
 pub enum LightEvent {
@@ -57,6 +57,11 @@ impl LightEventSender {
     }
     pub fn reset(&mut self) -> Result<()> {
         Ok(self.event_tx.try_send(LightEvent::Reset)?)
+    }
+
+    pub fn new_pari() -> (LightEventSender, Receiver<LightEvent>) {
+        let (tx, rx) = mpsc::channel(10);
+        (LightEventSender::new(tx), rx)
     }
 }
 
