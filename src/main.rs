@@ -1,4 +1,4 @@
-use futures::{executor::ThreadPool, task::SpawnExt};
+use futures::executor::ThreadPool;
 use smart_brite::{
     ble::BleControl,
     button::Button,
@@ -17,7 +17,7 @@ fn main() -> anyhow::Result<()> {
         peripherals.rmt.channel0,
     )?));
 
-    let pool = ThreadPool::new()?;
+    let pool = ThreadPool::builder().pool_size(3).create()?;
 
     let nvs_store = NvsStore::new(nvs_partition)?;
 
@@ -43,16 +43,8 @@ fn main() -> anyhow::Result<()> {
     time_task_manager.handle_event(time_event_rx, ble_control.clone())?;
     ble_control.init()?;
     button.init()?;
-
-    pool.clone().spawn(async move {
-        match handle_light_event(event_rx, ble_control, nvs_store, led, pool).await {
-            Ok(_) => {}
-            Err(e) => {
-                log::error!("handle_light_event error: {}", e);
-            }
-        }
-    })?;
-
     time_task_manager.run()?;
+    handle_light_event(event_rx, ble_control, nvs_store, led, pool)?;
+
     Ok(())
 }
