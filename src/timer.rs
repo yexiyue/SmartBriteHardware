@@ -128,7 +128,7 @@ impl TimeTaskManager {
         Ok(())
     }
 
-    pub fn event(
+    pub fn handle_event(
         &self,
         mut task_rx: mpsc::Receiver<TimerEvent>,
         ble_control: BleControl,

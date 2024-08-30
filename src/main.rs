@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
         ble_control.clone(),
         light_event_sender,
     )?;
-    time_task_manager.event(time_event_rx, ble_control.clone())?;
+    time_task_manager.handle_event(time_event_rx, ble_control.clone())?;
     ble_control.init()?;
     button.init()?;
 
