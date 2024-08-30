@@ -1,12 +1,22 @@
-use anyhow::{anyhow, Result};
-use chrono::{DateTime, Datelike, NaiveTime, TimeDelta, Utc};
+use std::time::Duration;
+
+use crate::light::LightControl;
+use anyhow::{anyhow, Ok, Result};
+use chrono::{DateTime, Datelike, TimeDelta, Utc};
 use esp_idf_svc::timer::{EspTimerService, Task};
 use serde::{Deserialize, Serialize};
-use crate::light::LightControl;
 
 /// 获取延迟执行时间
 pub trait GetDelta {
     fn get_delta(&self) -> anyhow::Result<TimeDelta>;
+    fn timeout(&self) -> anyhow::Result<bool> {
+        let delay = self.get_delta()?;
+        if delay > TimeDelta::zero() && delay <= TimeDelta::seconds(1) {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,12 +54,11 @@ impl OnceTask {
     {
         let mut async_timer = timer_service.timer_async()?;
         loop {
-            let delay = self.get_delta()?;
-            if delay < TimeDelta::zero() {
+            async_timer.after(Duration::from_secs(1)).await?;
+            if self.timeout()? {
+                cb()?;
                 break;
             }
-            async_timer.after(delay.to_std()?).await?;
-            cb()?;
         }
         Ok(())
     }
@@ -65,10 +74,10 @@ impl GetDelta for DayTask {
     fn get_delta(&self) -> Result<TimeDelta> {
         let now = Utc::now();
         let time = now
-            .with_time(NaiveTime::MIN)
+            .with_time(self.delay.time())
             .single()
-            .ok_or(anyhow!("Invalid time"))?
-            + self.delay.time().signed_duration_since(NaiveTime::MIN);
+            .ok_or(anyhow!("Invalid time"))?;
+
         if time > now {
             Ok(time.signed_duration_since(now))
         } else {
@@ -84,8 +93,10 @@ impl DayTask {
     {
         let mut async_timer = timer_service.timer_async()?;
         loop {
-            async_timer.after(self.get_delta()?.to_std()?).await?;
-            cb()?;
+            async_timer.after(Duration::from_secs(1)).await?;
+            if self.timeout()? {
+                cb()?;
+            }
         }
     }
 }
@@ -103,10 +114,9 @@ impl GetDelta for WeekTask {
         let weekday = now.weekday().number_from_monday();
         let days_until_target = (self.day_of_week + 7 - weekday) % 7;
         let time = now
-            .with_time(NaiveTime::MIN)
+            .with_time(self.delay.time())
             .single()
             .ok_or(anyhow!("Invalid time"))?
-            + self.delay.time().signed_duration_since(NaiveTime::MIN)
             + TimeDelta::days(days_until_target as i64);
 
         if time > now {
@@ -124,8 +134,10 @@ impl WeekTask {
     {
         let mut async_timer = timer_service.timer_async()?;
         loop {
-            async_timer.after(self.get_delta()?.to_std()?).await?;
-            cb()?;
+            async_timer.after(Duration::from_secs(1)).await?;
+            if self.timeout()? {
+                cb()?;
+            }
         }
     }
 }
