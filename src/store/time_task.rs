@@ -11,7 +11,7 @@ pub trait GetDelta {
     fn get_delta(&self) -> anyhow::Result<TimeDelta>;
     fn timeout(&self) -> anyhow::Result<bool> {
         let delay = self.get_delta()?;
-        if delay > TimeDelta::zero() && delay <= TimeDelta::seconds(1) {
+        if delay > TimeDelta::zero() && delay <= TimeDelta::seconds(60) {
             Ok(true)
         } else {
             Ok(false)
@@ -54,7 +54,7 @@ impl OnceTask {
     {
         let mut async_timer = timer_service.timer_async()?;
         loop {
-            async_timer.after(Duration::from_secs(1)).await?;
+            async_timer.after(Duration::from_secs(60)).await?;
             if self.timeout()? {
                 cb()?;
                 break;
@@ -93,7 +93,7 @@ impl DayTask {
     {
         let mut async_timer = timer_service.timer_async()?;
         loop {
-            async_timer.after(Duration::from_secs(1)).await?;
+            async_timer.after(Duration::from_secs(60)).await?;
             if self.timeout()? {
                 cb()?;
             }
@@ -134,7 +134,7 @@ impl WeekTask {
     {
         let mut async_timer = timer_service.timer_async()?;
         loop {
-            async_timer.after(Duration::from_secs(1)).await?;
+            async_timer.after(Duration::from_secs(60)).await?;
             if self.timeout()? {
                 cb()?;
             }
