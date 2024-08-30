@@ -36,7 +36,7 @@ serde_json = "1.0.124"
 rgb = { version = "0.8.48", features = ["serde"] }
 esp32-nimble = { version = "0.7.0", features = ["debug"] }
 chrono = { version = "0.4.38", features = ["serde"] }
-futures = "0.3.30"
+futures = { version = "0.3.30", features = ["thread-pool"] }
 
 [build-dependencies]
 embuild = "0.32.0"

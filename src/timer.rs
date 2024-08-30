@@ -3,7 +3,8 @@ use crate::{ble::BleControl, store::time_task::TimeTask};
 use anyhow::Result;
 use esp32_nimble::utilities::mutex::Mutex;
 use esp_idf_svc::timer::{EspTaskTimerService, EspTimerService, Task};
-use futures::{channel::mpsc, executor::LocalSpawner, task::SpawnExt, StreamExt};
+use futures::executor::ThreadPool;
+use futures::{channel::mpsc, task::SpawnExt, StreamExt};
 use futures::{future::abortable, stream::AbortHandle};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
@@ -45,7 +46,7 @@ pub struct TimeTaskManager {
     pub light_event_sender: LightEventSender,
     pub timer_service: EspTimerService<Task>,
     pub abort_handles: Arc<Mutex<HashMap<String, AbortHandle>>>,
-    pub spawner: LocalSpawner,
+    pub pool: ThreadPool,
 }
 
 unsafe impl Send for TimeTaskManager {}
@@ -54,14 +55,14 @@ impl TimeTaskManager {
     pub fn new(
         tasks: Arc<Mutex<Vec<TimeTask>>>,
         light_event_sender: LightEventSender,
-        spawner: LocalSpawner,
+        pool: ThreadPool,
     ) -> Self {
         Self {
             light_event_sender,
             tasks,
             abort_handles: Arc::new(Mutex::new(HashMap::new())),
             timer_service: EspTaskTimerService::new().unwrap(),
-            spawner,
+            pool,
         }
     }
 
@@ -113,7 +114,7 @@ impl TimeTaskManager {
         self.abort_handles
             .lock()
             .insert(time_task_name, abort_handle);
-        self.spawner.spawn(async {
+        self.pool.spawn(async {
             match future.await {
                 Ok(res) => {
                     log::info!("Timer task {:?} finished", res);
@@ -133,7 +134,7 @@ impl TimeTaskManager {
         ble_control: BleControl,
     ) -> Result<()> {
         let manager = self.clone();
-        self.spawner.spawn(async move {
+        self.pool.spawn(async move {
             if let Some(event) = task_rx.next().await {
                 match event {
                     TimerEvent::AddTask(time_task) => {
