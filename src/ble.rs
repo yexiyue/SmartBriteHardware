@@ -176,7 +176,12 @@ impl BleControl {
                 characteristic.notify();
             })
             .create_2904_descriptor();
-        let transmission = Transmission::new(service, Arc::new(Mutex::new(vec![])), pool);
+        let transmission = Transmission::new(
+            service,
+            Arc::new(Mutex::new(vec![])),
+            uuid128!("ae0e7bca-a1bb-9533-756a-f3546bad65d6"),
+            pool,
+        );
         transmission.init();
         // 配置广告数据并启动广告
         advertising.lock().set_data(

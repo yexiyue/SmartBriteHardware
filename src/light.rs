@@ -158,6 +158,7 @@ pub fn handle_light_event(
             LightEvent::Close => {
                 #[cfg(debug_assertions)]
                 log::warn!("close");
+
                 if open_task.lock().unwrap().is_some() {
                     open_task.lock().unwrap().take().unwrap().abort();
                 }
@@ -167,6 +168,7 @@ pub fn handle_light_event(
             LightEvent::Open => {
                 #[cfg(debug_assertions)]
                 log::warn!("open");
+
                 if open_task.lock().unwrap().is_some() {
                     open_task.lock().unwrap().take().unwrap().abort();
                 }

@@ -1,10 +1,13 @@
-use std::sync::{Arc, Condvar};
-
-use esp32_nimble::{utilities::mutex::Mutex, uuid128, NimbleProperties};
+use anyhow::Result;
+use esp32_nimble::{
+    utilities::{mutex::Mutex, BleUuid},
+    uuid128, NimbleProperties,
+};
 use futures::{channel::mpsc, executor::ThreadPool, task::SpawnExt, StreamExt};
 use meta_date::{ChunkMetaData, MetaData};
 use msg::{NotifyMessage, ReadMessage};
 use rand::random;
+use std::sync::{Arc, Condvar};
 pub mod meta_date;
 pub mod msg;
 
@@ -36,10 +39,11 @@ impl Transmission {
     pub fn new(
         service: Arc<Mutex<esp32_nimble::BLEService>>,
         data: Arc<Mutex<Vec<u8>>>,
+        uuid: BleUuid,
         pool: ThreadPool,
     ) -> Self {
         let characteristic = service.lock().create_characteristic(
-            uuid128!("ae0e7bca-a1bb-9533-756a-f3546bad65d6"),
+            uuid,
             NimbleProperties::NOTIFY | NimbleProperties::READ | NimbleProperties::WRITE,
         );
         characteristic.lock().create_2904_descriptor();
@@ -108,8 +112,10 @@ impl Transmission {
                         ReadMessage::StartWrite(meta_data) => {
                             write_meta_data.lock().replace(meta_data);
                             *transmission.data.lock() = vec![];
+
                             #[cfg(debug_assertions)]
                             log::warn!("替换meta_data");
+
                             transmission
                                 .characteristic
                                 .lock()
@@ -156,6 +162,9 @@ impl Transmission {
                                                     .lock()
                                                     .set_value(&NotifyMessage::WriteFinish.bytes())
                                                     .notify();
+                                                // 写入完成重置状态
+                                                transmission.state.lock().unwrap().take();
+                                                transmission.condvar.notify_one();
                                             }
                                         }
                                     }
@@ -208,5 +217,28 @@ impl Transmission {
                 }
                 attr.set_value(&[]);
             });
+    }
+
+    pub fn get_value(&self) -> Result<Vec<u8>> {
+        let mut state = self.state.lock().unwrap();
+        // 如果正在写入，则等待写入完成再读取数据
+        while let Some(_) = &*state {
+            state = self.condvar.wait(state).unwrap();
+        }
+        Ok(self.data.lock().clone())
+    }
+
+    pub fn set_value(&self, value: Vec<u8>) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+
+        while let Some(_) = &*state {
+            state = self.condvar.wait(state).unwrap();
+        }
+        *self.data.lock() = value;
+        self.characteristic
+            .lock()
+            .set_value(&NotifyMessage::DataUpdate.bytes())
+            .notify();
+        Ok(())
     }
 }
