@@ -2,11 +2,13 @@ use crate::{
     light::{LightControl, LightEventSender, LightState},
     store::{time_task::TimeTask, NvsStore, Scene},
     timer::{TimerEvent, TimerEventSender},
+    transmission::Transmission,
 };
 use anyhow::Result;
 use esp32_nimble::{
     utilities::mutex::Mutex, uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties,
 };
+use futures::executor::ThreadPool;
 
 use std::{sync::Arc, time::Duration};
 
@@ -24,6 +26,7 @@ impl BleControl {
         nvs_store: NvsStore,
         light_sender: LightEventSender,
         mut time_sender: TimerEventSender,
+        pool: ThreadPool,
     ) -> Result<Self> {
         // 获取BLE设备实例
         let device = BLEDevice::take();
@@ -36,6 +39,7 @@ impl BleControl {
 
         // 配置BLE连接时的回调函数
         server.on_connect(|server, desc| {
+            #[cfg(debug_assertions)]
             log::info!("on_connect: {:#?}", desc);
 
             server
@@ -49,6 +53,7 @@ impl BleControl {
 
         // 配置BLE断开连接时的回调函数
         server.on_disconnect(|desc, reason| {
+            #[cfg(debug_assertions)]
             log::warn!("on_disconnect: {:#?}, reason: {:#?}", desc, reason)
         });
 
@@ -65,21 +70,25 @@ impl BleControl {
             .lock()
             .on_write(move |args| {
                 let data = args.recv_data();
+                #[cfg(debug_assertions)]
                 log::warn!("data:{data:?}");
                 match Scene::from_u8(data) {
                     Ok(scene) => {
                         if light.set_scene(scene).is_err() {
                             args.reject();
+                            #[cfg(debug_assertions)]
                             log::error!("set scene error");
                         }
                     }
                     Err(e) => {
                         args.reject();
+                        #[cfg(debug_assertions)]
                         log::error!("parse scene error: {:#?}", e);
                     }
                 }
             })
             .on_subscribe(|characteristic, desc, _| {
+                #[cfg(debug_assertions)]
                 log::info!("on_subscribe: {:#?}", desc);
                 characteristic.notify();
             })
@@ -101,6 +110,7 @@ impl BleControl {
             };
             if res.is_err() {
                 args.reject();
+                #[cfg(debug_assertions)]
                 log::error!("control error");
             }
         });
@@ -111,6 +121,7 @@ impl BleControl {
         state_characteristic
             .lock()
             .on_subscribe(|characteristic, desc, _| {
+                #[cfg(debug_assertions)]
                 log::info!("on_subscribe: {:#?}", desc);
                 characteristic.notify();
             })
@@ -133,9 +144,11 @@ impl BleControl {
                         time.subsec_nanos() / 1000,
                     )
                 }
+                #[cfg(debug_assertions)]
                 log::warn!("set time {time:?}");
             } else {
                 args.reject();
+                #[cfg(debug_assertions)]
                 log::error!("time error");
             }
         });
@@ -154,6 +167,7 @@ impl BleControl {
                     }
                     Err(e) => {
                         args.reject();
+                        #[cfg(debug_assertions)]
                         log::error!("parse time task error: {:#?}", e);
                     }
                 };
@@ -162,6 +176,8 @@ impl BleControl {
                 characteristic.notify();
             })
             .create_2904_descriptor();
+        let transmission = Transmission::new(service, Arc::new(Mutex::new(vec![])), pool);
+        transmission.init();
         // 配置广告数据并启动广告
         advertising.lock().set_data(
             BLEAdvertisementData::new()

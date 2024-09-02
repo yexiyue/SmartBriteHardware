@@ -34,6 +34,7 @@ fn main() -> anyhow::Result<()> {
         nvs_store.clone(),
         light_event_sender.clone(),
         timer_event_sender,
+        pool.clone(),
     )?;
     let button = Button::new(
         peripherals.pins.gpio9,

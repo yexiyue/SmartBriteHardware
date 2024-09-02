@@ -9,6 +9,7 @@ pub mod led;
 pub mod light;
 pub mod store;
 pub mod timer;
+pub mod transmission;
 
 pub fn init() -> Result<(EspSystemEventLoop, Peripherals, EspDefaultNvsPartition)> {
     // 链接SDK中的补丁，以修正某些功能的兼容性问题。

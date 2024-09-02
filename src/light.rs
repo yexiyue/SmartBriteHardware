@@ -156,6 +156,7 @@ pub fn handle_light_event(
     while let Ok(event) = event_rx.recv() {
         match event {
             LightEvent::Close => {
+                #[cfg(debug_assertions)]
                 log::warn!("close");
                 if open_task.lock().unwrap().is_some() {
                     open_task.lock().unwrap().take().unwrap().abort();
@@ -164,6 +165,7 @@ pub fn handle_light_event(
                 ble_control.set_state(LightState::Closed);
             }
             LightEvent::Open => {
+                #[cfg(debug_assertions)]
                 log::warn!("open");
                 if open_task.lock().unwrap().is_some() {
                     open_task.lock().unwrap().take().unwrap().abort();
@@ -178,13 +180,16 @@ pub fn handle_light_event(
                     match future.await {
                         Ok(res) => match res {
                             Ok(_) => {
+                                #[cfg(debug_assertions)]
                                 log::info!("open led success");
                             }
                             Err(e) => {
+                                #[cfg(debug_assertions)]
                                 log::error!("open led error:{e}");
                             }
                         },
                         Err(_) => {
+                            #[cfg(debug_assertions)]
                             log::warn!("open led abort");
                         }
                     }

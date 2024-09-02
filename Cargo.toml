@@ -37,6 +37,7 @@ rgb = { version = "0.8.48", features = ["serde"] }
 esp32-nimble = { version = "0.7.0", features = ["debug"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
+rand = "0.8.5"
 
 [build-dependencies]
 embuild = "0.32.0"

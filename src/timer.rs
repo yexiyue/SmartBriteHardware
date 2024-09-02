@@ -117,9 +117,11 @@ impl TimeTaskManager {
         self.pool.spawn(async {
             match future.await {
                 Ok(res) => {
+                    #[cfg(debug_assertions)]
                     log::info!("Timer task {:?} finished", res);
                 }
                 Err(e) => {
+                    #[cfg(debug_assertions)]
                     log::warn!("Timer task  aborted: {}", e);
                 }
             }
