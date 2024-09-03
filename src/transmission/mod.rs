@@ -28,7 +28,6 @@ pub enum State {
 #[derive(Clone)]
 pub struct Transmission {
     pub data: Arc<Mutex<Vec<u8>>>,
-    pub service: Arc<Mutex<esp32_nimble::BLEService>>,
     pub characteristic: Arc<Mutex<esp32_nimble::BLECharacteristic>>,
     pub state: Arc<std::sync::Mutex<Option<State>>>,
     pub condvar: Arc<Condvar>,
@@ -48,7 +47,6 @@ impl Transmission {
         characteristic.lock().create_2904_descriptor();
         Self {
             data: Arc::new(Mutex::new(vec![])),
-            service,
             characteristic,
             state: Arc::new(std::sync::Mutex::new(None)),
             condvar: Arc::new(Condvar::new()),
@@ -58,7 +56,7 @@ impl Transmission {
 
     pub fn init<F>(&self, mut on_write_finish: Option<F>)
     where
-        F: FnMut(&[u8]) -> Result<(), anyhow::Error> + Send + Sync + 'static,
+        F: FnMut(Vec<u8>, &Transmission) -> Result<(), anyhow::Error> + Send + Sync + 'static,
     {
         let transmission = self.clone();
         let transmission2 = self.clone();
@@ -160,6 +158,13 @@ impl Transmission {
                                             } else {
                                                 #[cfg(debug_assertions)]
                                                 log::warn!("写入完成，数据长度：{}", data.len());
+
+                                                let data_clone = data.clone();
+                                                drop(data);
+                                                // 写入完成重置状态
+                                                transmission.state.lock().unwrap().take();
+                                                transmission.condvar.notify_one();
+
                                                 transmission
                                                     .characteristic
                                                     .lock()
@@ -168,7 +173,7 @@ impl Transmission {
 
                                                 // 写入成功回调函数
                                                 if let Some(on_write) = on_write_finish.as_mut() {
-                                                    match on_write(&data) {
+                                                    match on_write(data_clone, &transmission) {
                                                         Ok(_) => {}
                                                         Err(e) => {
                                                             transmission
@@ -184,9 +189,6 @@ impl Transmission {
                                                         }
                                                     }
                                                 }
-                                                // 写入完成重置状态
-                                                transmission.state.lock().unwrap().take();
-                                                transmission.condvar.notify_one();
                                             }
                                         }
                                     }

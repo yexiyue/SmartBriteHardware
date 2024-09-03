@@ -1,4 +1,4 @@
-use crate::light::{LightControl, LightEventSender};
+use crate::light::{LightEvent, LightEventSender};
 use crate::{ble::BleControl, store::time_task::TimeTask};
 use anyhow::Result;
 use esp32_nimble::utilities::mutex::Mutex;
@@ -104,9 +104,9 @@ impl TimeTaskManager {
         let (future, abort_handle) = abortable(async move {
             time_task
                 .run(timer_service, || match control {
-                    LightControl::Close => light_event_sender.close(),
-                    LightControl::Open => light_event_sender.open(),
-                    LightControl::Reset => unreachable!(),
+                    LightEvent::Close => light_event_sender.close(),
+                    LightEvent::Open => light_event_sender.open(),
+                    LightEvent::Reset => unreachable!(),
                 })
                 .await
         });

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::light::LightControl;
+use crate::light::LightEvent;
 use anyhow::{anyhow, Ok, Result};
 use chrono::{DateTime, Datelike, TimeDelta, Utc};
 use esp_idf_svc::timer::{EspTimerService, Task};
@@ -29,7 +29,7 @@ pub enum TimeFrequency {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeTask {
     pub name: String,
-    pub operation: LightControl,
+    pub operation: LightEvent,
     #[serde(flatten)]
     pub frequency: TimeFrequency,
 }

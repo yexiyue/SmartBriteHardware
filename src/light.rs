@@ -14,27 +14,20 @@ use std::{
     time::Duration,
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LightEvent {
     Close,
     Open,
-    SetScene(Scene),
     Reset,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LightControl {
-    Close,
-    Open,
-    Reset,
-}
-
-impl From<&[u8]> for LightControl {
+impl From<&[u8]> for LightEvent {
     fn from(data: &[u8]) -> Self {
         match data {
-            b"close" => LightControl::Close,
-            b"open" => LightControl::Open,
-            b"reset" => LightControl::Reset,
+            b"close" => LightEvent::Close,
+            b"open" => LightEvent::Open,
+            b"reset" => LightEvent::Reset,
             _ => panic!("invalid control"),
         }
     }
@@ -42,7 +35,7 @@ impl From<&[u8]> for LightControl {
 
 #[derive(Debug, Clone)]
 pub struct LightEventSender {
-    event_tx: Sender<LightEvent>,
+    pub event_tx: Sender<LightEvent>,
 }
 
 impl LightEventSender {
@@ -55,9 +48,7 @@ impl LightEventSender {
     pub fn open(&mut self) -> Result<()> {
         Ok(self.event_tx.send(LightEvent::Open)?)
     }
-    pub fn set_scene(&mut self, scene: Scene) -> Result<()> {
-        Ok(self.event_tx.send(LightEvent::SetScene(scene))?)
-    }
+
     pub fn reset(&mut self) -> Result<()> {
         Ok(self.event_tx.send(LightEvent::Reset)?)
     }
@@ -199,10 +190,6 @@ pub fn handle_light_event(
                 .unwrap();
                 *open_task.lock().unwrap() = Some(abort_handle);
                 ble_control.set_state(LightState::Opened);
-            }
-            LightEvent::SetScene(scene) => {
-                log::info!("scene:{scene:#?}");
-                ble_control.set_scene_width_store(scene)?;
             }
             LightEvent::Reset => {
                 ble_control.reset_scene()?;
