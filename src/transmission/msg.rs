@@ -63,6 +63,7 @@ pub enum NotifyMessage {
     WriteReady { mtu: u16 },
     WriteReceive { next_start: u32 },
     WriteFinish,
+    Error(String),
 }
 
 impl DataFromBytes for NotifyMessage {
@@ -82,6 +83,10 @@ impl DataFromBytes for NotifyMessage {
                 let next_start = u32::from_ne_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
                 (NotifyMessage::WriteReceive { next_start }, &bytes[5..])
             }
+            5 => (
+                NotifyMessage::Error(String::from_utf8_lossy(&bytes[1..]).to_string()),
+                &[],
+            ),
             _ => {
                 unreachable!()
             }
@@ -104,6 +109,11 @@ impl DataFromBytes for NotifyMessage {
             NotifyMessage::WriteReceive { next_start } => {
                 let mut bytes = vec![4];
                 bytes.extend(next_start.to_ne_bytes());
+                bytes
+            }
+            NotifyMessage::Error(err) => {
+                let mut bytes = vec![5];
+                bytes.extend(err.as_bytes());
                 bytes
             }
         }

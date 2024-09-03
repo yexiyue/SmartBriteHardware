@@ -8,7 +8,9 @@ use anyhow::Result;
 use esp32_nimble::{
     utilities::mutex::Mutex, uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties,
 };
+
 use futures::executor::ThreadPool;
+use serde_json::Value;
 
 use std::{sync::Arc, time::Duration};
 
@@ -178,11 +180,16 @@ impl BleControl {
             .create_2904_descriptor();
         let transmission = Transmission::new(
             service,
-            Arc::new(Mutex::new(vec![])),
             uuid128!("ae0e7bca-a1bb-9533-756a-f3546bad65d6"),
             pool,
         );
-        transmission.init();
+        transmission.set_value(serde_json::to_vec(&*nvs_store.scene.lock())?)?;
+        transmission.init(Some(move |data: &[u8]| {
+            let data = serde_json::from_slice::<Value>(data);
+            log::warn!("transmission state changed {data:#?}");
+            Ok(())
+        }));
+
         // 配置广告数据并启动广告
         advertising.lock().set_data(
             BLEAdvertisementData::new()

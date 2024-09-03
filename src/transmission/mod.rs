@@ -1,7 +1,7 @@
 use anyhow::Result;
 use esp32_nimble::{
     utilities::{mutex::Mutex, BleUuid},
-    uuid128, NimbleProperties,
+    NimbleProperties,
 };
 use futures::{channel::mpsc, executor::ThreadPool, task::SpawnExt, StreamExt};
 use meta_date::{ChunkMetaData, MetaData};
@@ -38,7 +38,6 @@ pub struct Transmission {
 impl Transmission {
     pub fn new(
         service: Arc<Mutex<esp32_nimble::BLEService>>,
-        data: Arc<Mutex<Vec<u8>>>,
         uuid: BleUuid,
         pool: ThreadPool,
     ) -> Self {
@@ -48,7 +47,7 @@ impl Transmission {
         );
         characteristic.lock().create_2904_descriptor();
         Self {
-            data,
+            data: Arc::new(Mutex::new(vec![])),
             service,
             characteristic,
             state: Arc::new(std::sync::Mutex::new(None)),
@@ -57,7 +56,10 @@ impl Transmission {
         }
     }
 
-    pub fn init(&self) {
+    pub fn init<F>(&self, mut on_write_finish: Option<F>)
+    where
+        F: FnMut(&[u8]) -> Result<(), anyhow::Error> + Send + Sync + 'static,
+    {
         let transmission = self.clone();
         let transmission2 = self.clone();
 
@@ -128,6 +130,7 @@ impl Transmission {
                                 .notify();
                             #[cfg(debug_assertions)]
                             log::warn!("发送通知");
+
                             transmission.state.lock().unwrap().replace(State::Writing);
                             transmission.condvar.notify_one();
                         }
@@ -162,6 +165,25 @@ impl Transmission {
                                                     .lock()
                                                     .set_value(&NotifyMessage::WriteFinish.bytes())
                                                     .notify();
+
+                                                // 写入成功回调函数
+                                                if let Some(on_write) = on_write_finish.as_mut() {
+                                                    match on_write(&data) {
+                                                        Ok(_) => {}
+                                                        Err(e) => {
+                                                            transmission
+                                                                .characteristic
+                                                                .lock()
+                                                                .set_value(
+                                                                    &NotifyMessage::Error(
+                                                                        e.to_string(),
+                                                                    )
+                                                                    .bytes(),
+                                                                )
+                                                                .notify();
+                                                        }
+                                                    }
+                                                }
                                                 // 写入完成重置状态
                                                 transmission.state.lock().unwrap().take();
                                                 transmission.condvar.notify_one();
@@ -170,8 +192,12 @@ impl Transmission {
                                     }
                                 }
                             }
-                            // todo 错误处理
-                            // args.reject();
+                            // 发送错误信息
+                            transmission
+                                .characteristic
+                                .lock()
+                                .set_value(&NotifyMessage::Error("写入失败".into()).bytes())
+                                .notify();
                         }
                     }
                 }
