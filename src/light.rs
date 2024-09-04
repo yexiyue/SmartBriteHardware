@@ -1,6 +1,6 @@
 use crate::ble::BleControl;
 use crate::led::{blend_colors, WS2812RMT};
-use crate::store::{Color, NvsStore, Scene};
+use crate::store::{Color, NvsStore};
 use anyhow::Result;
 use esp_idf_svc::timer::{EspAsyncTimer, EspTaskTimerService};
 use futures::executor::ThreadPool;

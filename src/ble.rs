@@ -66,10 +66,11 @@ impl BleControl {
             pool.clone(),
         );
         let nvs_store_clone = nvs_store.clone();
-        scene_transmission.init(Some(move |data: Vec<u8>, _: &Transmission| {
+        scene_transmission.init(Some(move |data: Vec<u8>, transmission: &Transmission| {
             let data = serde_json::from_slice::<Scene>(&data)?;
             *nvs_store_clone.scene.lock() = data;
             nvs_store_clone.write_scene()?;
+            transmission.notify_update();
             Ok(())
         }));
 
@@ -89,6 +90,7 @@ impl BleControl {
                 log::error!("control error");
             }
         });
+
         let state_characteristic = service.lock().create_characteristic(
             uuid128!("e192efae-9626-4767-8a27-b96cb9753e10"),
             NimbleProperties::NOTIFY | NimbleProperties::READ,

@@ -190,6 +190,7 @@ impl Transmission {
                                                     }
                                                 }
                                             }
+                                            continue;
                                         }
                                     }
                                 }
@@ -263,10 +264,14 @@ impl Transmission {
             state = self.condvar.wait(state).unwrap();
         }
         *self.data.lock() = value;
+        self.notify_update();
+        Ok(())
+    }
+
+    pub fn notify_update(&self) {
         self.characteristic
             .lock()
             .set_value(&NotifyMessage::DataUpdate.bytes())
             .notify();
-        Ok(())
     }
 }
