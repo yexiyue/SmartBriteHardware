@@ -115,14 +115,16 @@ impl BleControl {
                 let t_ptr = data.as_ptr() as *const [u8; 8];
                 let timestamp = u64::from_ne_bytes(unsafe { std::ptr::read(t_ptr) });
                 let time = Duration::from_millis(timestamp);
+
                 unsafe {
                     esp_idf_svc::sys::sntp_set_system_time(
                         time.as_secs() as u32,
                         time.subsec_nanos() / 1000,
                     )
                 }
+                let now = chrono::Utc::now().to_rfc3339();
                 #[cfg(debug_assertions)]
-                log::warn!("set time {time:?}");
+                log::warn!("set time {now}");
             } else {
                 args.reject();
                 #[cfg(debug_assertions)]
@@ -138,6 +140,7 @@ impl BleControl {
         );
         time_task_transmission.init(Some(move |data: Vec<u8>, _: &Transmission| {
             let event = serde_json::from_slice::<TimerEvent>(&data)?;
+            log::warn!("time task event: {:?}", event);
             time_sender.event_tx.try_send(event)?;
             Ok(())
         }));

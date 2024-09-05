@@ -137,7 +137,7 @@ impl TimeTaskManager {
     ) -> Result<()> {
         let manager = self.clone();
         self.pool.spawn(async move {
-            if let Some(event) = task_rx.next().await {
+            while let Some(event) = task_rx.next().await {
                 match event {
                     TimerEvent::AddTask(time_task) => {
                         manager.add_task(time_task).unwrap();
