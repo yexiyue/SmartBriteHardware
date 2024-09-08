@@ -139,14 +139,24 @@ impl TimeTaskManager {
         self.pool.spawn(async move {
             while let Some(event) = task_rx.next().await {
                 match event {
-                    TimerEvent::AddTask(time_task) => {
-                        manager.add_task(time_task).unwrap();
-                    }
+                    TimerEvent::AddTask(time_task) => match manager.add_task(time_task) {
+                        Ok(_) => {
+                            log::info!("add task success");
+                        }
+                        Err(e) => {
+                            log::error!("add task failed: {}", e);
+                        }
+                    },
                     TimerEvent::RemoveTask(name) => {
                         manager.abort(&name);
                     }
                 }
-                ble_control.set_timer_with_store().unwrap();
+                match ble_control.set_timer_with_store() {
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::error!("{}", e);
+                    }
+                }
             }
         })?;
         Ok(())
